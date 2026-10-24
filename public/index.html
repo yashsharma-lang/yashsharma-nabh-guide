@@ -279,16 +279,47 @@ async function artifactAI(){
 /* ---- Vercel + Supabase mode ---- */
 let sb=null;
 function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=rej; document.head.append(s); }); }
+let ACCESS="";
 async function webBoot(){
   const cfg = await fetch("/api/config").then(r=>r.json());
   await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js");
-  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {auth:{persistSession:false}});
+  const base = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {auth:{persistSession:false}});
+  const check = async c => { const {data,error}=await base.rpc("check_code",{c}); if(error) throw error; return data===true; };
+  let saved=""; try{ saved=localStorage.getItem("nabh6-code")||""; }catch(e){}
+  if(!(saved && await check(saved).catch(()=>false))){
+    saved = await codeGate(check);
+  }
+  ACCESS=saved;
+  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {auth:{persistSession:false}, global:{headers:{"x-access-code":ACCESS}}});
   try{ me.email = localStorage.getItem("nabh6-name") || null; }catch(e){}
   return true;
 }
+function codeGate(check){
+  return new Promise(resolve=>{
+    const keep=$("app").innerHTML;
+    $("app").innerHTML=`<div class="gate sheet">
+      <span class="eyebrow">NABH 6th Edition</span>
+      <h1>NABH Readiness Guide</h1>
+      <p class="sub" style="margin:0">Enter the access code your quality team shared with you.</p>
+      <form id="gf" class="row" style="flex-direction:column;align-items:stretch">
+        <label for="gc" class="sub" style="margin:0">Access code</label>
+        <input type="password" id="gc" required autocomplete="current-password">
+        <label class="sub" style="margin:0;display:flex;gap:8px;align-items:center"><input type="checkbox" id="gr" checked style="width:auto"> Remember on this device</label>
+        <button class="btn" type="submit" id="gb">Open the guide</button>
+      </form>
+      <p class="sub" id="gm" style="margin:0"></p></div>`;
+    $("gc").focus();
+    $("gf").onsubmit=async e=>{ e.preventDefault(); const c=$("gc").value.trim(); $("gb").disabled=true; $("gm").textContent="Checking…";
+      let ok=false; try{ ok=await check(c); }catch(err){ $("gm").textContent="Couldn't check the code. Try again in a moment."; $("gb").disabled=false; return; }
+      if(!ok){ $("gm").textContent="That code isn't right. Check with your quality team."; $("gb").disabled=false; return; }
+      if($("gr").checked){ try{ localStorage.setItem("nabh6-code",c); }catch(err){} }
+      $("app").innerHTML=keep; rewire(); resolve(c); };
+  });
+}
 function nameBox(){
-  $("who").innerHTML=`<label for="myname" style="display:flex;gap:6px;align-items:center">Your name <input type="text" id="myname" value="${esc(me.email||"")}" placeholder="shown on your changes" style="width:180px;padding:6px 8px;font-size:14px"></label>`;
+  $("who").innerHTML=`<label for="myname" style="display:flex;gap:6px;align-items:center">Your name <input type="text" id="myname" value="${esc(me.email||"")}" placeholder="shown on your changes" style="width:180px;padding:6px 8px;font-size:14px"></label><button type="button" id="lock">Lock</button>`;
   $("myname").onchange=()=>{ me.email=$("myname").value.trim()||null; try{ localStorage.setItem("nabh6-name",me.email||""); }catch(e){} toast(me.email?"Changes will show as "+me.email:"Name cleared"); };
+  $("lock").onclick=()=>{ try{ localStorage.removeItem("nabh6-code"); }catch(e){} location.reload(); };
 }
 function webStore(){
   const up=(t,row)=>sb.from(t).upsert({...row,updated_by:me.email,updated_at:new Date().toISOString()});
@@ -297,21 +328,25 @@ function webStore(){
   const setC=queue(async(k,v)=>{ const {error}=await up("settings",{id:k,data:v}); if(error) throw error; });
   const rowS=r=>({s:r.s,a:r.a,by:r.updated_by,t:r.updated_at}), rowD=r=>({html:r.html,status:r.status,notes:r.notes,by:r.updated_by,t:r.updated_at});
   return {
-    mode:"Shared: everyone with the link sees the same scores and drafts. Enter your name at the top so changes show who made them.",
+    mode:"Shared: everyone with the access code sees the same scores and drafts (updates appear within 15 seconds). Enter your name at the top so changes show who made them.",
     async init(cb){
       const [a,b,c]=await Promise.all([sb.from("scores").select("*"),sb.from("drafts").select("*"),sb.from("settings").select("*").eq("id","settings")]);
       (a.data||[]).forEach(r=>S.scores[r.code]=rowS(r)); (b.data||[]).forEach(r=>S.drafts[r.pid]=rowD(r)); S.settings=(c.data&&c.data[0]&&c.data[0].data)||{};
       cb();
-      sb.channel("nabh").on("postgres_changes",{event:"*",schema:"public",table:"scores"},p=>{ if(p.new&&p.new.code){ S.scores[p.new.code]=rowS(p.new); onRemote(); } })
-        .on("postgres_changes",{event:"*",schema:"public",table:"drafts"},p=>{ if(p.new&&p.new.pid){ S.drafts[p.new.pid]=rowD(p.new); onRemote(); } })
-        .on("postgres_changes",{event:"*",schema:"public",table:"settings"},p=>{ if(p.new&&p.new.data){ S.settings=p.new.data; onRemote(); } }).subscribe();
+      let since=new Date().toISOString();
+      const poll=async()=>{ if(document.hidden) return;
+        const t=since; since=new Date().toISOString();
+        const [x,y,z]=await Promise.all([sb.from("scores").select("*").gt("updated_at",t),sb.from("drafts").select("*").gt("updated_at",t),sb.from("settings").select("*").gt("updated_at",t)]);
+        let n=0; (x.data||[]).forEach(r=>{S.scores[r.code]=rowS(r);n++;}); (y.data||[]).forEach(r=>{S.drafts[r.pid]=rowD(r);n++;}); (z.data||[]).forEach(r=>{ if(r.id==="settings"){S.settings=r.data;n++;} });
+        if(n) onRemote(); };
+      setInterval(()=>poll().catch(()=>{}),15000);
     },
     async setScore(code,v){ setS(code,v); }, async setDraft(pid,v){ setD(pid,v); }, async setSettings(v){ setC("settings",v); }
   };
 }
 function webAI(){
   return { async ask(input,{onText,signal}={}){
-    let r; try{ r=await fetch("/api/ask",{method:"POST",signal,headers:{"content-type":"application/json"},body:JSON.stringify({messages:input})}); }
+    let r; try{ r=await fetch("/api/ask",{method:"POST",signal,headers:{"content-type":"application/json","x-access-code":ACCESS},body:JSON.stringify({messages:input})}); }
     catch(e){ throw {code:signal&&signal.aborted?"cancelled":"upstream_error"}; }
     if(!r.ok){ const t=await r.text(); throw {code:r.status===401?"session_expired":r.status===429?"rate_limited":"upstream_error",message:t}; }
     const rd=r.body.getReader(), dec=new TextDecoder(); let text="", trunc=false;
@@ -350,7 +385,12 @@ function go(t,opts={}){
   renderRail(); renderSheet(); renderQuick();
   if(opts.scroll!==false && window.innerWidth<=880) $("sheet").scrollIntoView({behavior:"smooth",block:"start"});
 }
-document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>go(b.dataset.tab,{scroll:false}));
+function rewire(){
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>go(b.dataset.tab,{scroll:false}));
+  if($("ask")){ $("ask").onsubmit=e=>{ e.preventDefault(); ask($("q").value); };
+    $("q").addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); ask($("q").value); } });
+    $("stop").onclick=()=>ctl&&ctl.abort(); }
+}
 
 /* ================= rail ================= */
 let curPol=DATA.pol[0].id;
@@ -797,9 +837,7 @@ async function ask(question){
   }finally{ $("send").disabled=false; $("stop").hidden=true; }
 }
 function disableDesk(){ $("ask").hidden=true; $("quick").hidden=true; $("unavail").hidden=false; }
-$("ask").onsubmit=e=>{ e.preventDefault(); ask($("q").value); };
-$("q").addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); ask($("q").value); } });
-$("stop").onclick=()=>ctl&&ctl.abort();
+rewire();
 function renderQuick(){
   let qs;
   if(tab==="check"){ const n=mode==="ch"?chByCode[cur].t:dpName[cur];
