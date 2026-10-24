@@ -1,5 +1,6 @@
 // Streams a Claude answer back to signed-in users only.
-// Env: ANTHROPIC_API_KEY (required), ANTHROPIC_MODEL (optional), SUPABASE_URL, SUPABASE_ANON_KEY, ALLOWED_EMAIL_DOMAINS (optional)
+// Env: ANTHROPIC_API_KEY (required), ANTHROPIC_MODEL (optional), ALLOWED_EMAIL_DOMAINS (optional)
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 export const config = { maxDuration: 300 };
 
 const hits = new Map(); // simple per-instance rate limit: 30 requests / 10 min / user
@@ -11,8 +12,8 @@ function limited(email) {
 }
 
 async function getUser(token) {
-  const r = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
-    headers: { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
   });
   if (!r.ok) return null;
   return r.json();

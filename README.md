@@ -44,8 +44,8 @@ Sign-in uses an emailed one-time link (Supabase Auth). Anyone who signs in can u
 
 | Name | Value |
 |---|---|
-| `SUPABASE_URL` | Project URL from step 2.3 |
-| `SUPABASE_ANON_KEY` | anon public key from step 2.3 |
+| `SUPABASE_URL` | *(optional)* already built in for this project |
+| `SUPABASE_ANON_KEY` | *(optional)* already built in for this project |
 | `ANTHROPIC_API_KEY` | your key from console.anthropic.com |
 | `ANTHROPIC_MODEL` | *(optional)* model id; default `claude-sonnet-5-5` |
 | `ALLOWED_EMAIL_DOMAINS` | *(optional)* e.g. `even.in` |
