@@ -9,7 +9,7 @@ A web app for NABH 6th Edition (Hospitals) preparation:
 - **KPIs**: all 50 indicators from the standard, plus the audit sample-size table.
 - **Ask the NABH guide**: a chat grounded in the standard that cites element codes and can see your current gaps.
 
-Sign-in uses an emailed one-time link (Supabase Auth). Anyone who signs in can update scores and policies. You can restrict access to your email domains (step 2.4).
+**No login.** Anyone with the site link can update scores and policies; they type their name at the top so changes show who made them, and every change is kept in `audit_log`. After running `supabase/schema.sql`, also run `supabase/no-login.sql`. The Claude bot is open to anyone with the link and is rate-limited per IP address, so share the link only inside your hospital.
 
 ---
 

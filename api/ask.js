@@ -1,22 +1,13 @@
-// Streams a Claude answer back to signed-in users only.
+// Streams a Claude answer back to the page. No login: rate-limited per IP address.
 // Env: ANTHROPIC_API_KEY (required), ANTHROPIC_MODEL (optional), ALLOWED_EMAIL_DOMAINS (optional)
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 export const config = { maxDuration: 300 };
 
-const hits = new Map(); // simple per-instance rate limit: 30 requests / 10 min / user
-function limited(email) {
+const hits = new Map(); // simple per-instance rate limit: 30 requests / 10 min / IP address
+function limited(key) {
   const now = Date.now(), w = 10 * 60 * 1000;
-  const arr = (hits.get(email) || []).filter(t => now - t < w);
-  arr.push(now); hits.set(email, arr);
+  const arr = (hits.get(key) || []).filter(t => now - t < w);
+  arr.push(now); hits.set(key, arr);
   return arr.length > 30;
-}
-
-async function getUser(token) {
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
-  });
-  if (!r.ok) return null;
-  return r.json();
 }
 
 function cleanMessages(msgs) {
@@ -38,12 +29,9 @@ function cleanMessages(msgs) {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Use POST");
-  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const user = token ? await getUser(token) : null;
-  if (!user || !user.email) return res.status(401).send("Sign in again");
-  const domains = (process.env.ALLOWED_EMAIL_DOMAINS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-  if (domains.length && !domains.some(d => user.email.toLowerCase().endsWith("@" + d))) return res.status(403).send("Email domain not allowed");
-  if (limited(user.email)) return res.status(429).send("Too many requests");
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  if (limited(ip)) return res.status(429).send("Too many requests");
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(503).send("ANTHROPIC_API_KEY is not set in Vercel");
 
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
   const messages = cleanMessages(body.messages);
