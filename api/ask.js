@@ -9,7 +9,9 @@ async function codeOk(code) {
     headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "content-type": "application/json" },
     body: JSON.stringify({ c: code }),
   });
-  return r.ok && (await r.json()) === true;
+  const txt = await r.text();
+  if (!r.ok) { console.error("check_code failed", r.status, txt.slice(0, 300)); return false; }
+  return txt.trim() === "true";
 }
 // Env: ANTHROPIC_API_KEY (required), ANTHROPIC_MODEL (optional), ALLOWED_EMAIL_DOMAINS (optional)
 export const config = { maxDuration: 300 };
@@ -43,7 +45,8 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Use POST");
   const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
   if (limited(ip)) return res.status(429).send("Too many requests");
-  if (!(await codeOk(String(req.headers["x-access-code"] || "")))) return res.status(401).send("Access code missing or changed");
+  const code = String(req.headers["x-access-code"] || "").trim();
+  if (!(await codeOk(code))) return res.status(401).send(code ? "Access code not accepted" : "No access code sent");
   if (!process.env.ANTHROPIC_API_KEY) return res.status(503).send("ANTHROPIC_API_KEY is not set in Vercel");
 
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});

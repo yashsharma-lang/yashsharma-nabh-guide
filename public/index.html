@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Cache-Control" content="no-cache">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230d6b5b'/><path d='M9 17l5 5 9-12' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round'/></svg>">
 <title>NABH Readiness Guide</title>
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}img{max-width:100%}</style>
@@ -348,7 +349,7 @@ function webAI(){
   return { async ask(input,{onText,signal}={}){
     let r; try{ r=await fetch("/api/ask",{method:"POST",signal,headers:{"content-type":"application/json","x-access-code":ACCESS},body:JSON.stringify({messages:input})}); }
     catch(e){ throw {code:signal&&signal.aborted?"cancelled":"upstream_error"}; }
-    if(!r.ok){ const t=await r.text(); throw {code:r.status===401?"session_expired":r.status===429?"rate_limited":"upstream_error",message:t}; }
+    if(!r.ok){ const t=await r.text(); throw {code:r.status===401?"bad_code":r.status===429?"rate_limited":r.status===503?"not_configured":"upstream_error",message:t}; }
     const rd=r.body.getReader(), dec=new TextDecoder(); let text="", trunc=false;
     try{ for(;;){ const {done,value}=await rd.read(); if(done) break; let chunk=dec.decode(value,{stream:true});
       if(chunk.includes("\u0000TRUNCATED")){ trunc=true; chunk=chunk.replace("\u0000TRUNCATED",""); }
@@ -814,7 +815,7 @@ ${ctx.gl.length?"\nGlossary:\n"+ctx.gl.map(g=>`- ${g.t}: ${g.d}`).join("\n"):""}
 ${ctx.chs.length?"\nChapter intents:\n"+ctx.chs.map(c=>`- ${c}: ${chByCode[c].i}`).join("\n"):""}`;
 }
 function addMsg(cls,html){ const d=document.createElement("div"); d.className="msg "+cls; d.innerHTML=html; $("log").append(d); return d; }
-const COPY={rate_limited:"Too many requests in a short time. Try again in a minute.",session_expired:"Your session expired. Sign in again.",refused:"The guide couldn't answer that. Try rephrasing.",empty_completion:"No answer came back. Try a narrower question.",prompt_too_large:"That pulled in too much. Ask about one department or standard."};
+const COPY={rate_limited:"Too many requests in a short time. Try again in a minute.",session_expired:"Your session expired. Reload the page.",bad_code:"The bot rejected your access code. Press Lock at the top and enter the current code.",not_configured:"The bot isn't set up yet: ANTHROPIC_API_KEY is missing in Vercel.",refused:"The guide couldn't answer that. Try rephrasing.",empty_completion:"No answer came back. Try a narrower question.",prompt_too_large:"That pulled in too much. Ask about one department or standard."};
 async function ask(question){
   question=question.trim(); if(!question||!ai) return;
   addMsg("u",esc(question));
@@ -833,7 +834,7 @@ async function ask(question){
   }catch(e){
     turns.pop();
     if(["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed"].includes(e.code)){ bubble.remove(); disableDesk(); }
-    else bubble.innerHTML=(e.text?md(e.text):"")+`<div class="note">${e.code==="cancelled"?"Stopped.":(COPY[e.code]||"The guide was interrupted. Ask again.")}</div>`;
+    else bubble.innerHTML=(e.text?md(e.text):"")+`<div class="note">${e.code==="cancelled"?"Stopped.":(COPY[e.code]||("The guide was interrupted. Ask again."+(e.message?" ("+esc(String(e.message).slice(0,160))+")":"")))}</div>`;
   }finally{ $("send").disabled=false; $("stop").hidden=true; }
 }
 function disableDesk(){ $("ask").hidden=true; $("quick").hidden=true; $("unavail").hidden=false; }
