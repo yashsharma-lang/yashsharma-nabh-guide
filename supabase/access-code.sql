@@ -43,15 +43,16 @@ grant select, insert, update on public.scores, public.drafts, public.settings to
 -- Keep the typed name as the editor
 create or replace function public.stamp_and_log() returns trigger
 language plpgsql security definer set search_path = public as $$
-declare k text;
+declare j jsonb; k text;
 begin
-  new.updated_by := left(coalesce(auth.jwt() ->> 'email', nullif(new.updated_by, ''), 'unnamed'), 120);
+  new.updated_by := left(coalesce(nullif(new.updated_by, ''), 'unnamed'), 120);
   new.updated_at := now();
-  k := case tg_table_name when 'scores' then new.code when 'drafts' then new.pid else new.id end;
+  j := to_jsonb(new);
+  k := coalesce(j->>'code', j->>'pid', j->>'id');
   insert into public.audit_log(tbl, key, changed_by, old, new)
   values (tg_table_name, k, new.updated_by,
           case when tg_op = 'UPDATE' then to_jsonb(old) - 'html' else null end,
-          to_jsonb(new) - 'html');
+          j - 'html');
   return new;
 end $$;
 
