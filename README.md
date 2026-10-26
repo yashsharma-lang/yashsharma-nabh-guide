@@ -46,7 +46,7 @@ A web app for NABH 6th Edition (Hospitals) preparation:
 |---|---|
 | `SUPABASE_URL` | *(optional)* already built in for this project |
 | `SUPABASE_ANON_KEY` | *(optional)* already built in for this project |
-| `GEMINI_API_KEY` | **free** key from aistudio.google.com → Get API key (no card needed) |
+| `GEMINI_API_KEY` | *(optional)* **free** key from aistudio.google.com → Get API key (no card needed) |
 | `ANTHROPIC_API_KEY` | *(optional, paid)* Claude key from console.anthropic.com; used instead of Gemini when set |
 | `GEMINI_MODEL` | *(optional)* default `gemini-flash-latest` |
 | `ANTHROPIC_MODEL` | *(optional)* default `claude-sonnet-5-5` |
@@ -58,6 +58,8 @@ A web app for NABH 6th Edition (Hospitals) preparation:
 To change something later, edit `public/index.html` and push. Vercel redeploys automatically.
 
 ## 4. Notes
+
+- **No AI key needed.** Without `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`, the guide answers from the built-in NABH data (no AI, nothing leaves the site), and the Policies tab creates a structured NABH policy template for each document. Add a key later to switch on AI answers and AI-written drafts.
 
 - **Your data.** Scores, action plans, policy drafts and document settings live in your Supabase project. Every change is written to `audit_log` with who made it and when (Supabase → Table Editor → audit_log).
 - **AI usage.** The chat and the drafter call Claude through `/api/ask` with your Anthropic key. Only signed-in users can call it, and each user is limited to about 30 requests per 10 minutes. Policy drafts take 1–2 minutes each. On the Hobby plan, functions stop after 60 seconds by default; long drafts need `maxDuration` 300, which needs Vercel Pro (or Fluid compute enabled).

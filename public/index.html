@@ -280,9 +280,9 @@ async function artifactAI(){
 /* ---- Vercel + Supabase mode ---- */
 let sb=null;
 function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=rej; document.head.append(s); }); }
-let ACCESS="";
+let ACCESS="", webAIOn=false;
 async function webBoot(){
-  const cfg = await fetch("/api/config").then(r=>r.json());
+  const cfg = await fetch("/api/config").then(r=>r.json()); webAIOn=!!cfg.aiEnabled;
   await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js");
   const base = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {auth:{persistSession:false}});
   const check = async c => { const {data,error}=await base.rpc("check_code",{c}); if(error) throw error; return data===true; };
@@ -595,6 +595,7 @@ function renderKPI(){
 
 /* ================= policies ================= */
 let genCtl=null;
+let GENLBL=["Draft with Claude","Redraft with Claude"];
 function renderPol(){
   const p=polById[curPol], d=S.drafts[p.id]||{}, st=settings();
   const oes=p.oe.map(c=>byCode[c]).filter(Boolean);
@@ -621,13 +622,13 @@ function renderPol(){
     <label class="sub" style="display:flex;flex-direction:column;gap:4px;margin:0">Extra instructions for this document (optional)
       <textarea id="pnote" rows="2" placeholder="e.g. include Karnataka KPME requirements; we use MEWS; LAMA form is in Kannada and English">${esc(d.notes||"")}</textarea></label>
     <div class="row">
-      <button class="btn" id="gen" type="button">${d.html?"Redraft with Claude":"Draft with Claude"}</button>
+      <button class="btn" id="gen" type="button">${d.html?GENLBL[1]:GENLBL[0]}</button>
       <button class="btn ghost" id="genstop" type="button" hidden>Stop</button>
       <button class="btn ghost" id="docx" type="button" ${d.html?"":"disabled"}>Download Word (.docx)</button>
       <button class="btn ghost" id="copy" type="button" ${d.html?"":"disabled"}>Copy text</button>
       <span class="status" id="pstat">${d.t?`Last saved ${new Date(d.t).toLocaleString()}${d.by?" by "+esc(d.by):""}`:""}</span>
     </div>
-    <div class="editor" id="ed" contenteditable="true" spellcheck="true" aria-label="Policy document">${d.html?sanitize(d.html):`<p style="color:var(--muted)">No draft yet. Choose <b>Draft with Claude</b> to generate a controlled document in NABH format, or type your own here.</p>`}</div>`;
+    <div class="editor" id="ed" contenteditable="true" spellcheck="true" aria-label="Policy document">${d.html?sanitize(d.html):`<p style="color:var(--muted)">No draft yet. Choose <b>${GENLBL[0]}</b> to generate a controlled document in NABH format, or type your own here.</p>`}</div>`;
   $("pst").value=d.status||"";
   $("pst").onchange=()=>savePol({status:$("pst").value});
   $("s-save").onclick=()=>{ const v={}; ["org","unit","prep","rev","appr","review","context"].forEach(k=>v[k]=$("s-"+k).value.trim()); S.settings=v; store.setSettings(v); toast("Settings saved"); };
@@ -683,9 +684,14 @@ Write in Markdown using exactly this structure:
 Rules: active voice, short sentences, "shall" for mandatory steps. Put hospital-specific values you don't know (phone extensions, names, timings not given) in [square brackets]. Make timeframes concrete where NABH expects one (e.g. care plan countersigned within 24 hours). After each procedure step that satisfies an element, add the code in brackets, e.g. (AAC.2.a). Be complete but practical: about 1,500 to 2,500 words. Output only the document.`;
 }
 async function draftPolicy(p){
+  if(LOCAL){ const ed=$("ed");
+    if(S.drafts[p.id]&&S.drafts[p.id].html && !draftPolicy.confirm){ draftPolicy.confirm=true; $("gen").textContent="Replace current draft? Click again"; setTimeout(()=>{draftPolicy.confirm=false; if($("gen")) $("gen").textContent=GENLBL[1];},4000); return; }
+    draftPolicy.confirm=false; const extra=$("pnote").value.trim();
+    ed.innerHTML=md(localPolicy(p,extra)); savePol({html:ed.innerHTML,status:(S.drafts[p.id]||{}).status||"draft",notes:extra});
+    $("gen").textContent=GENLBL[1]; toast("Template created. Fill the [bracketed] parts with your hospital's details."); return; }
   if(!ai){ toast("The drafting assistant isn't available here."); return; }
   const ed=$("ed"); const extra=$("pnote").value.trim();
-  if(S.drafts[p.id]&&S.drafts[p.id].html && !draftPolicy.confirm){ draftPolicy.confirm=true; $("gen").textContent="Replace current draft? Click again"; setTimeout(()=>{draftPolicy.confirm=false; if($("gen")) $("gen").textContent="Redraft with Claude";},4000); return; }
+  if(S.drafts[p.id]&&S.drafts[p.id].html && !draftPolicy.confirm){ draftPolicy.confirm=true; $("gen").textContent="Replace current draft? Click again"; setTimeout(()=>{draftPolicy.confirm=false; if($("gen")) $("gen").textContent=GENLBL[1];},4000); return; }
   draftPolicy.confirm=false;
   genCtl=new AbortController(); $("gen").disabled=true; $("genstop").hidden=false; $("pstat").textContent="Drafting… this takes a minute or two.";
   ed.innerHTML=`<p style="color:var(--muted)">Thinking…</p>`; ed.contentEditable="false";
@@ -697,7 +703,7 @@ async function draftPolicy(p){
     if(e.text) ed.innerHTML=md(e.text); else ed.innerHTML=(S.drafts[p.id]&&S.drafts[p.id].html)?sanitize(S.drafts[p.id].html):"";
     $("pstat").textContent = e.code==="cancelled"?"Stopped. Nothing was saved.":(COPY[e.code]||"Drafting was interrupted. Try again.");
     if(["not_granted","sampling_disabled"].includes(e.code)) toast("Claude isn't allowed for this page.");
-  }finally{ ed.contentEditable="true"; if($("gen")){ $("gen").disabled=false; $("genstop").hidden=true; $("gen").textContent="Redraft with Claude"; } }
+  }finally{ ed.contentEditable="true"; if($("gen")){ $("gen").disabled=false; $("genstop").hidden=true; $("gen").textContent=GENLBL[1]; } }
 }
 
 /* ---------- markdown → HTML, sanitizer, HTML → DOCX ---------- */
@@ -773,7 +779,9 @@ const STOP=new Set("a an the and or of to for in on at by is are be what which w
 const words=s=>s.toLowerCase().match(/[a-z0-9]+/g)||[];
 function retrieve(question){
   const qw=words(question).filter(w=>!STOP.has(w)&&w.length>2), qs=question.toLowerCase();
-  const hitDp=DATA.dp.filter(d=>words(d.n).some(w=>w.length>3&&!["department","services","management","patient","patients","care","control"].includes(w)&&qs.includes(w))).map(d=>d.id);
+  const ALIAS={icu:["icu","intensive care","critical care","hdu"],er:["emergency","casualty","er ","ed "],opd:["opd","outpatient","out-patient"],ipd:["ipd","inpatient","in-patient","ward"],ot:["ot ","operation theatre","operating theatre","surgery","surgical"],cssd:["cssd","steril"],mrd:["mrd","medical record"],hr:["hr ","human resource","staff"],paed:["nicu","paediatric","pediatric","neonat","child"],obs:["labour","obstetric","maternity","antenatal","gynae"],ph:["pharmacy","pharmac"],lab:["lab ","laboratory","pathology"],rad:["radiology","imaging","x-ray","ct ","mri","usg","ultrasound"],bb:["blood bank","blood storage","transfusion"],ic:["infection","hic","ipc"],q:["quality","patient safety","psq"],fms:["facility","fms","engineering","fire","biomedical"],hk:["housekeeping","laundry","bmw","waste"],bill:["billing","tpa","insurance","tariff"],diet:["diet","nutrition","kitchen"],dial:["dialysis"],amb:["ambulance"],reg:["registration","admission","front office"],nur:["nursing","nurse"],rom:["management","governance","rom "],madm:["medical admin","medical superintendent"]};
+  const qsp=" "+qs+" ";
+  const hitDp=DATA.dp.filter(d=>(ALIAS[d.id]||[]).some(a=>new RegExp("\\b"+a.trim().replace(/[-]/g,"\\-")+(a.trim().length<=4?"\\b":"")).test(qs)) || words(d.n).some(w=>w.length>4&&!["department","services","management","patient","patients","control","rights","planning"].includes(w)&&qs.includes(w))).map(d=>d.id);
   const hitCh=DATA.ch.filter(c=>new RegExp("\\b"+c.c.toLowerCase()+"\\b").test(qs)||qs.includes(c.t.toLowerCase())).map(c=>c.c);
   const scored=els.map(e=>{ const t=(e.r+" "+e.g+" "+byStd[e.s].t+" "+Object.values(e.n).join(" ")).toLowerCase(); let s=0;
     qw.forEach(w=>{ if(t.includes(w)) s+=w.length>5?2:1; });
@@ -817,7 +825,9 @@ ${ctx.chs.length?"\nChapter intents:\n"+ctx.chs.map(c=>`- ${c}: ${chByCode[c].i}
 function addMsg(cls,html){ const d=document.createElement("div"); d.className="msg "+cls; d.innerHTML=html; $("log").append(d); return d; }
 const COPY={rate_limited:"Too many requests in a short time. Try again in a minute.",session_expired:"Your session expired. Reload the page.",bad_code:"The bot rejected your access code. Press Lock at the top and enter the current code.",not_configured:"The bot isn't set up yet: add GEMINI_API_KEY (free) in Vercel and redeploy.",refused:"The guide couldn't answer that. Try rephrasing.",empty_completion:"No answer came back. Try a narrower question.",prompt_too_large:"That pulled in too much. Ask about one department or standard."};
 async function ask(question){
-  question=question.trim(); if(!question||!ai) return;
+  question=question.trim(); if(!question) return;
+  if(LOCAL){ addMsg("u",esc(question)); $("q").value=""; const b=addMsg("a",md(localAnswer(question))+`<div class="note">Built from the NABH standard and checklists, without AI.</div>`); b.querySelectorAll("[data-pol]").forEach(x=>x.onclick=()=>go("pol",{id:x.dataset.pol})); b.scrollIntoView({behavior:"smooth",block:"nearest"}); return; }
+  if(!ai) return;
   addMsg("u",esc(question));
   const bubble=addMsg("a",`<p style="color:var(--muted)">Reading the standard…</p>`);
   $("send").disabled=true; $("stop").hidden=false; $("q").value="";
@@ -850,6 +860,95 @@ function renderQuick(){
   $("quick").querySelectorAll("button").forEach(b=>b.onclick=()=>ask(qs[b.dataset.i]));
 }
 
+
+/* ================= built-in guide (no AI service) ================= */
+let LOCAL=false;
+const LAWMAP=[
+ [/waste|bmw|spill|hazard/i,"Bio-Medical Waste Management Rules, 2016 (as amended)"],
+ [/radiat|imaging|x-ray|radiolog|ct |mri|nuclear|radiopharm/i,"Atomic Energy (Radiation Protection) Rules, 2004 and AERB safety codes"],
+ [/narcotic|psychotrop|ndps/i,"Narcotic Drugs and Psychotropic Substances Act, 1985 and Rules"],
+ [/medicat|drug|pharm|formulary|prescri|dispens/i,"Drugs and Cosmetics Act, 1940 and Rules, 1945 (Schedules H, H1, X)"],
+ [/blood|transfus/i,"Drugs and Cosmetics Rules, 1945 (blood centre provisions) and National Blood Transfusion Council guidelines"],
+ [/transplant|organ/i,"Transplantation of Human Organs and Tissues Act, 1994 and Rules, 2014"],
+ [/record|informat|confiden|data|document control/i,"Digital Personal Data Protection Act, 2023"],
+ [/fire|evacuat|emergenc(y|ies) within/i,"National Building Code of India, 2016, Part 4 (Fire and Life Safety)"],
+ [/obstetr|antenatal|pregnan|labour|neonat/i,"PC-PNDT Act, 1994 and MTP Act, 1971 (amended 2021)"],
+ [/medico-legal|emergency|brought dead|mlc/i,"Bharatiya Nagarik Suraksha Sanhita, 2023 (medico-legal provisions)"],
+ [/infect|hand hygiene|steril|antimicrob|isolation/i,"National Guidelines for Infection Prevention and Control in Healthcare Facilities (MoHFW/NCDC, 2020)"],
+ [/restraint|mental|psychiatr/i,"Mental Healthcare Act, 2017"],
+ [/medical gas|oxygen|cylinder/i,"Gas Cylinder Rules, 2016 (PESO)"],
+ [/staff|recruit|employ|appraisal|grievance|disciplin|workplace/i,"Applicable labour laws and the Sexual Harassment of Women at Workplace Act, 2013"],
+ [/consent/i,"Indian Contract Act, 1872 (capacity to consent) and NMC regulations on informed consent"],
+];
+function lawsFor(text){ const out=["Karnataka Private Medical Establishments Act, 2007 and Clinical Establishments Act, 2010 (as applicable)"]; LAWMAP.forEach(([re,l])=>{ if(re.test(text)&&!out.includes(l)) out.push(l); }); return out; }
+const EVID=/(record|register|log|display|signage|checklist|form|format|training|certificate|audit|minutes|policy|sop|manual|list|consent|report|chart|board|drill|license|licence|agreement|mou|contract|calibration|inventory|file)/i;
+function evidencePieces(e){ return (e.g||"").replace(/\)\s*\(/g,"; ").split(/;|\.\s+(?=[A-Za-z])|\)\.?\s*(?=[A-Z])/).map(x=>x.replace(/^[\s(*-]+|[\s)*.]+$/g,"").replace(/\s+/g," ")).filter(x=>x.length>3); }
+const KSTOP=new Set("organisation organization patients patient process provided services service hospital including through between percentage number appropriate defined documented within during should".split(" "));
+function kpiFor(text){ const w=new Set((text.toLowerCase().match(/[a-z]{6,}/g)||[]).filter(x=>!KSTOP.has(x)));
+  return DATA.kpi.map(k=>{ const t=(k.ind+" "+k.def).toLowerCase(); let n=0; w.forEach(x=>{ if(t.includes(x)) n++; }); return [n,k]; }).filter(x=>x[0]>=3).sort((a,b)=>b[0]-a[0]).map(x=>x[1]); }
+function localAnswer(q){
+  const ctx=retrieve(q), ql=q.toLowerCase();
+  let title, list;
+  const pol=DATA.pol.find(p=>ql.includes(p.t.toLowerCase())) || (tab==="pol"&&/polic|sop|this/i.test(q)?polById[curPol]:null);
+  if(/gap|score|ready|readiness|weak|action plan|progress|compliance/i.test(q)){
+    const R=readiness("final");
+    return `#### Where you stand (final-assessment rules)\n${R.scored.length<R.cons.length/2?"_Provisional: fewer than half the elements are scored, so these figures will change._\n":""}- Scored: ${R.scored.length} of ${R.cons.length}\n- Overall compliance: ${fmt(R.overall,0)}% (need 80%)\n- Commitment compliance: ${fmt(R.comm,0)}% (need 80%)\n- Core elements below 4: ${R.coreLow.length?R.coreLow.map(e=>e.c+" ("+sc(e.c)+")").join(", "):"none"}\n- Standards averaging below 4: ${R.stdLow.length?R.stdLow.map(x=>x.s.c+" ("+fmt(x.a)+")").join(", "):"none"}\n- Scores of 3 or less without an action plan: ${R.noPlan.length?R.noPlan.map(e=>e.c).join(", "):"none"}\n\n#### Fix first\n${(R.coreLow.length?R.coreLow:R.needPlan).slice(0,12).map(e=>`- ${e.c} [${LV[e.l]}] ${e.r}${e.g?" — evidence: "+e.g:""}`).join("\n")||"- Score more elements in the Checklist tab to see priorities."}`;
+  }
+  if(pol){ title="Policy: "+pol.t; list=pol.oe.map(c=>byCode[c]).filter(Boolean); }
+  else if(ctx.dps.length){ title=dpName[ctx.dps[0]]; list=areaEls("dp",ctx.dps[0]); }
+  else if(ctx.chs.length){ title=chByCode[ctx.chs[0]].t; list=areaEls("ch",ctx.chs[0]); }
+  else if(/^(what|which|how)/i.test(q) && ctx.els.length<1 && tab==="check"){ title=mode==="ch"?chByCode[cur].t:dpName[cur]; list=areaEls(mode,cur); }
+  else { title="Elements matching your question"; list=ctx.els.slice(0,25); }
+  if(!list.length) return "I couldn't match that to the standard. Try naming a department (e.g. ICU, Pharmacy), a chapter (e.g. MOM) or an element code (e.g. COP.9.b).";
+  const wantKPI=/kpi|indicator|monitor|measure/i.test(q);
+  const core=list.filter(e=>e.l==="CR"), rest=list.filter(e=>e.l!=="CR");
+  const pols=[...new Set(list.flatMap(e=>polByOE[e.c]||[]))].map(id=>polById[id]);
+  const ev=[]; list.forEach(e=>evidencePieces(e).forEach(p=>{ if(EVID.test(p)) ev.push(`${p} (${e.c})`); }));
+  const kp=(ctx.kp.length?ctx.kp:kpiFor(list.map(e=>e.r+" "+e.g).join(" "))).slice(0,10);
+  let o=`#### ${title}\n${list.length} elements: ${core.length} Core, ${list.filter(e=>e.l==="CM").length} Commitment, ${list.filter(e=>e.l==="AC"||e.l==="EX").length} Achievement/Excellence. ${list.filter(e=>e.d).length} need written documentation (*).\n`;
+  if(wantKPI){ o+=`\n#### KPIs to monitor\n${kp.length?kp.map(k=>`- **${k.ind}** (${k.std}; ${k.unit}; ${k.freq})${k.form?" — formula: "+k.form:""}`).join("\n"):"- No specific NABH KPI matches; track the hospital-wide KPIs in the KPIs tab."}\n`; }
+  if(core.length) o+=`\n#### Core elements (must score 4 or more)\n${core.map(e=>`- **${e.c}** ${e.r}${e.d?" *":""}${e.g?" — evidence: "+e.g:""}`).join("\n")}\n`;
+  if(pols.length) o+=`\n#### Policies and SOPs to have\n${pols.map(p=>`- ${p.t} (owner: ${p.o}; status: ${polStatus(p.id)||"not started"})`).join("\n")}\n`;
+  if(ev.length) o+=`\n#### Records, registers and displays the assessor will look for\n${[...new Set(ev)].slice(0,30).map(x=>"- "+x).join("\n")}\n`;
+  o+=`\n#### All other elements\n${rest.slice(0,45).map(e=>`- **${e.c}** [${LV[e.l]}] ${e.r}${e.d?" *":""}`).join("\n")}${rest.length>45?`\n- …and ${rest.length-45} more in the Checklist tab`:""}\n`;
+  if(!wantKPI && kp.length) o+=`\n#### Related KPIs\n${kp.slice(0,6).map(k=>`- ${k.ind} (${k.freq})`).join("\n")}\n`;
+  return o;
+}
+function localPolicy(p, extra){
+  const st=settings(), code=`${st.unit}/${p.ch}/POL/${p.id.slice(1)}`, today=new Date();
+  const next=new Date(today); next.setMonth(next.getMonth()+(parseInt(st.review)||12));
+  const f=d=>d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
+  const oes=p.oe.map(c=>byCode[c]).filter(Boolean);
+  const all=oes.map(e=>e.r+" "+e.g).join(" ");
+  const depts=[...new Set(oes.flatMap(e=>e.dp))].map(d=>dpName[d]);
+  const kp=kpiFor(all+" "+p.t).slice(0,5);
+  const gl=DATA.gl.filter(g=>{ const t=g.t.toLowerCase(); return t.length>3 && all.toLowerCase().includes(t); }).slice(0,8);
+  const recs=[]; oes.forEach(e=>evidencePieces(e).forEach(x=>{ if(/(record|register|log|form|format|checklist|chart|report|minutes|consent|list|certificate)/i.test(x)) recs.push(x); }));
+  const shall=t=>t.replace(/^The organisation /i,"[Organisation] ").replace(/\b(is|are) (done|provided|performed|obtained|maintained|followed|implemented|documented|displayed|defined|taken|handled|used|stored|labelled|verified|monitored|reviewed|conducted|carried out)\b/i,"shall be $2").replace(/\b(adheres|implements|ensures|maintains|identifies|has|uses|provides|defines|describes|obtains|takes|captures|redress(es)?) /i,m=>"shall "+m.trim().replace(/(e)?s$/,"").replace(/^ha$/,"have").replace(/^redress$/,"redress")+" ");
+  let o=`| | |\n|---|---|\n| Name of Organisation | ${st.org} |\n| Document Title | ${p.t} |\n| Document Code | ${code} |\n| Issue No. | 01 |\n| Revision No. | 00 |\n| Date of Issue | ${f(today)} |\n| Date of Next Review | ${f(next)} |\n| Page | 1 of [n] |\n\n`;
+  o+=`## 1. Purpose\nTo set out the policy and procedure for "${p.t}" at ${st.org}, so that it is carried out uniformly, safely and in line with the NABH Accreditation Standards for Hospitals (6th Edition), objective elements ${p.oe.join(", ")}.\n\n`;
+  o+=`## 2. Scope\nApplies to ${depts.length?(depts.length>6?depts.slice(0,6).join(", ")+" and other departments involved":depts.join(", ")):"all departments"} of ${st.org}, in all settings (outpatient, inpatient, daycare and emergency) where applicable.${st.context?" Hospital context: "+st.context:""}\n\n`;
+  o+=`## 3. Responsibility\n| Role | Responsibility |\n|---|---|\n| ${p.o} | Owns this document; implements it and trains staff |\n| ${st.rev} | Reviews the document; monitors compliance and indicators |\n| ${st.appr} | Approves the document and provides resources |\n| All staff concerned | Follow this policy and report deviations |\n\n`;
+  o+=`## 4. Definitions\n${gl.length?gl.map(g=>`- **${g.t}:** ${g.d}`).join("\n"):"- [Add definitions of terms used in this document]"}\n\n`;
+  o+=`## 5. Policy\n${st.org} shall ensure that:\n${oes.map(e=>`- ${e.r.replace(/^The organisation/i,"the hospital").replace(/^([A-Z])([a-z])/,(m,a,b)=>a.toLowerCase()+b)} (${e.c})`).join("\n")}\n\n`;
+  o+=`## 6. Procedure\n`;
+  oes.forEach((e,i)=>{ const pcs=evidencePieces(e);
+    o+=`### 6.${i+1} ${e.r.replace(/\.$/,"")} (${e.c})\n`;
+    o+=`1. Responsible: [designation] in ${p.o}.\n`;
+    if(pcs.length) pcs.forEach(x=>{ o+=`${"1"}. ${x.charAt(0).toUpperCase()+x.slice(1)}.\n`; });
+    else o+=`1. [Describe the steps, in the order they happen, to meet this requirement.]\n`;
+    o+=`1. Document the action in [form / register name] and retain it as per the records schedule below.\n\n`; });
+  o+=`## 7. Records, Forms and Formats\n| Record | Format no. | Kept by | Retention |\n|---|---|---|---|\n${([...new Set(recs)].slice(0,10).map(r=>`| ${r} | [${st.unit}/${p.ch}/F/__] | ${p.o} | [period] |`).join("\n"))||`| [Record name] | [${st.unit}/${p.ch}/F/__] | ${p.o} | [period] |`}\n\n`;
+  o+=`## 8. Monitoring and Quality Indicators\n| Indicator | Formula | Frequency | Responsibility |\n|---|---|---|---|\n${kp.length?kp.map(k=>`| ${k.ind} | ${k.form||"[as defined by NABH]"} | ${k.freq} | ${st.rev} |`).join("\n"):`| Compliance with this policy (audit) | Compliant samples / samples audited × 100 | Monthly | ${st.rev} |`}\n\n`;
+  o+=`## 9. Training\n- All staff covered by this policy are trained at induction and at least once a year; training records are kept by HR / Training.\n- Retraining after any revision of this document or when audits show non-compliance.\n\n`;
+  o+=`## 10. References\n- NABH Accreditation Standards for Hospitals, 6th Edition (January 2025): ${p.oe.join(", ")}\n${lawsFor(all+" "+p.t).map(l=>`- ${l} (verify current version)`).join("\n")}\n\n`;
+  o+=`## 11. Related Documents\n${[...new Set(oes.flatMap(e=>(polByOE[e.c]||[])).filter(id=>id!==p.id))].slice(0,6).map(id=>`- ${polById[id].t}`).join("\n")||"- [List related policies and SOPs]"}\n\n`;
+  if(extra) o+=`> Note from the hospital: ${extra}\n\n`;
+  o+=`| | Prepared by | Reviewed by | Approved by |\n|---|---|---|---|\n| Designation | ${st.prep} | ${st.rev} | ${st.appr} |\n| Name | | | |\n| Signature | | | |\n| Date | | | |\n\n`;
+  o+=`**Amendment record**\n\n| Sr. No. | Date | Section | Change | Approved by |\n|---|---|---|---|---|\n| 1 | | | | |\n`;
+  return o;
+}
+
 /* ================= render & remote updates ================= */
 function renderSheet(){ if(tab==="check") renderCheck(); else if(tab==="pol") renderPol(); else if(tab==="ready") renderReady(); else renderKPI(); }
 let remoteT;
@@ -867,10 +966,12 @@ async function boot(){
   } else {
     let ok=false; try{ ok=await webBoot(); }catch(e){ console.warn(e); $("app").innerHTML=`<div class="gate sheet"><h2>Setup incomplete</h2><p>The app couldn't reach its configuration. Check the Supabase environment variables in Vercel.</p></div>`; return; }
     if(!ok) return;
-    store=webStore(); ai=webAI(); nameBox();
+    store=webStore(); nameBox();
+    if(webAIOn){ ai=webAI(); } else { LOCAL=true; ai=null; GENLBL=["Create policy template","Recreate template"];
+      document.querySelector("#desk h2").textContent="NABH guide"; document.querySelector("#desk .sub").textContent="Ask about a department, chapter, policy, KPIs or your gaps. Answers are assembled directly from the NABH 6th Edition standard and checklists, without AI, so nothing you type leaves the site."; }
   }
   $("savemode").textContent=store.mode;
-  if(!ai) disableDesk();
+  if(!ai && !LOCAL) disableDesk();
   await store.init(()=>route());
 }
 function route(){

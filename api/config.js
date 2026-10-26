@@ -12,6 +12,7 @@ export default function handler(req, res) {
   res.status(200).json({
     supabaseUrl: SUPABASE_URL,
     supabaseAnonKey: SUPABASE_ANON_KEY,
+    aiEnabled: !!(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY),
     allowedDomains: (process.env.ALLOWED_EMAIL_DOMAINS || "").split(",").map(s => s.trim()).filter(Boolean),
   });
 }
