@@ -815,7 +815,7 @@ ${ctx.gl.length?"\nGlossary:\n"+ctx.gl.map(g=>`- ${g.t}: ${g.d}`).join("\n"):""}
 ${ctx.chs.length?"\nChapter intents:\n"+ctx.chs.map(c=>`- ${c}: ${chByCode[c].i}`).join("\n"):""}`;
 }
 function addMsg(cls,html){ const d=document.createElement("div"); d.className="msg "+cls; d.innerHTML=html; $("log").append(d); return d; }
-const COPY={rate_limited:"Too many requests in a short time. Try again in a minute.",session_expired:"Your session expired. Reload the page.",bad_code:"The bot rejected your access code. Press Lock at the top and enter the current code.",not_configured:"The bot isn't set up yet: ANTHROPIC_API_KEY is missing in Vercel.",refused:"The guide couldn't answer that. Try rephrasing.",empty_completion:"No answer came back. Try a narrower question.",prompt_too_large:"That pulled in too much. Ask about one department or standard."};
+const COPY={rate_limited:"Too many requests in a short time. Try again in a minute.",session_expired:"Your session expired. Reload the page.",bad_code:"The bot rejected your access code. Press Lock at the top and enter the current code.",not_configured:"The bot isn't set up yet: add GEMINI_API_KEY (free) in Vercel and redeploy.",refused:"The guide couldn't answer that. Try rephrasing.",empty_completion:"No answer came back. Try a narrower question.",prompt_too_large:"That pulled in too much. Ask about one department or standard."};
 async function ask(question){
   question=question.trim(); if(!question||!ai) return;
   addMsg("u",esc(question));

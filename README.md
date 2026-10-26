@@ -46,8 +46,10 @@ A web app for NABH 6th Edition (Hospitals) preparation:
 |---|---|
 | `SUPABASE_URL` | *(optional)* already built in for this project |
 | `SUPABASE_ANON_KEY` | *(optional)* already built in for this project |
-| `ANTHROPIC_API_KEY` | your key from console.anthropic.com |
-| `ANTHROPIC_MODEL` | *(optional)* model id; default `claude-sonnet-5-5` |
+| `GEMINI_API_KEY` | **free** key from aistudio.google.com → Get API key (no card needed) |
+| `ANTHROPIC_API_KEY` | *(optional, paid)* Claude key from console.anthropic.com; used instead of Gemini when set |
+| `GEMINI_MODEL` | *(optional)* default `gemini-flash-latest` |
+| `ANTHROPIC_MODEL` | *(optional)* default `claude-sonnet-5-5` |
 | `ALLOWED_EMAIL_DOMAINS` | *(optional)* e.g. `even.in` |
 
 4. Click **Deploy**, then finish step 2.6 with the URL Vercel gives you.

@@ -13,7 +13,7 @@ async function codeOk(code) {
   if (!r.ok) { console.error("check_code failed", r.status, txt.slice(0, 300)); return false; }
   return txt.trim() === "true";
 }
-// Env: ANTHROPIC_API_KEY (required), ANTHROPIC_MODEL (optional), ALLOWED_EMAIL_DOMAINS (optional)
+// Env: GEMINI_API_KEY (free tier) or ANTHROPIC_API_KEY. Optional: GEMINI_MODEL, ANTHROPIC_MODEL.
 export const config = { maxDuration: 300 };
 
 const hits = new Map(); // simple per-instance rate limit: 30 requests / 10 min / IP address
@@ -47,12 +47,54 @@ export default async function handler(req, res) {
   if (limited(ip)) return res.status(429).send("Too many requests");
   const code = String(req.headers["x-access-code"] || "").trim();
   if (!(await codeOk(code))) return res.status(401).send(code ? "Access code not accepted" : "No access code sent");
-  if (!process.env.ANTHROPIC_API_KEY) return res.status(503).send("ANTHROPIC_API_KEY is not set in Vercel");
+  const useGemini = !process.env.ANTHROPIC_API_KEY && !!process.env.GEMINI_API_KEY;
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) return res.status(503).send("No AI key set in Vercel (GEMINI_API_KEY or ANTHROPIC_API_KEY)");
 
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
   const messages = cleanMessages(body.messages);
   if (!messages) return res.status(400).send("Bad request");
 
+  if (useGemini) return gemini(messages, res);
+  return anthropic(messages, res);
+}
+
+async function gemini(messages, res) {
+  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      contents: messages.map(m => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+      generationConfig: { maxOutputTokens: Number(process.env.GEMINI_MAX_TOKENS || 16000), temperature: 0.3 },
+    }),
+  });
+  if (!upstream.ok || !upstream.body) {
+    const t = await upstream.text().catch(() => "");
+    console.error("Gemini error", upstream.status, t.slice(0, 500));
+    return res.status(upstream.status === 429 ? 429 : 502).send("The AI service returned an error (" + upstream.status + ")");
+  }
+  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" });
+  const reader = upstream.body.getReader(); const dec = new TextDecoder(); let buf = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith("data:")) continue;
+        let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
+        const c = ev.candidates && ev.candidates[0];
+        if (c && c.content && c.content.parts) for (const p of c.content.parts) if (p.text && !p.thought) res.write(p.text);
+        if (c && c.finishReason === "MAX_TOKENS") res.write("\u0000TRUNCATED");
+        if (ev.error) res.write("\u0000ERROR");
+      }
+    }
+  } catch (e) { console.error(e); res.write("\u0000ERROR"); }
+  res.end();
+}
+
+async function anthropic(messages, res) {
   const upstream = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
